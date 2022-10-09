@@ -82,13 +82,15 @@ class RCDM(object):
             
 
     def evolve(self, rounds):
-        entropies = np.zeros(rounds)
+        entropies = np.zeros(rounds // 100)
         for t in range(rounds):
             # print(round)
             self.evolve_random_unitary(t % 3)
             self.evolve_probabilistic_measurement(t % 3)
-            entropies[t] = qi.entropy(self.state)
+            if t % 100 == 0:
+                entropies[t // 100] = qi.entropy(self.state)
         return entropies
+
 
 # a = qi.DensityMatrix(qi.Statevector([1, 0]))
 
