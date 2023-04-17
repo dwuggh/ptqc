@@ -2,8 +2,11 @@
 #include <cstdlib>
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/QR>
+#include <eigen3/Eigen/Eigenvalues>
 #include <iostream>
 #include <random>
+#include <vector>
+// #include <Spectra/GenEigsSolver.h>
 
 using mat     = Eigen::Matrix<std::complex<qreal>, Eigen::Dynamic, Eigen::Dynamic>;
 using mat6c   = Eigen::Matrix<std::complex<qreal>, 6, 6>;
@@ -22,7 +25,7 @@ void printComplexMatrixN(const ComplexMatrixN& mat) {
 
 std::random_device rd;
 std::mt19937 gen(rd());
-std::normal_distribution<qreal> dist(0., 0.5);
+std::normal_distribution<qreal> dist(0., 1.);
 std::uniform_real_distribution<double> uniform(0, 1);
 
 std::complex<qreal> gen_complex() {
@@ -33,11 +36,13 @@ std::complex<qreal> gen_complex() {
 }
 mat6c gen_mat() {
     mat6c mat;
+    qreal norm = 1 / std::sqrt(2);
     for (int i = 0; i < 6; i++) {
         for (int j = 0; j < 6; j++) {
             mat(i, j) = gen_complex();
         }
     }
+    mat = mat * norm;
     return mat;
 }
 
@@ -68,6 +73,42 @@ ComplexMatrixN haar_random_8() {
     return A;
 }
 
+void printDensityMatrix(Qureg qureg) {
+    auto d = 1 << qureg.numQubitsRepresented;
+    for (qint i = 0; i < d; i++) {
+        for (qint j = 0; j < d; j++) {
+            auto val = getDensityAmp(qureg, i, j);
+            std::printf("%.3f ", val.real);
+        }
+        std::printf("\n");
+    }
+}
+
+void printDensityMatrix(const mat &dm) {
+    auto d = dm.rows();
+    for (qint i = 0; i < d; i++) {
+        for (qint j = 0; j < d; j++) {
+            auto val = dm(i, j);
+            std::printf("%.3f ", val.real());
+        }
+        std::printf("\n");
+    }
+}
+
+void printDensityMatrixEasy(const mat &dm) {
+    auto d = dm.rows();
+    for (qint i = 0; i < d; i++) {
+        for (qint j = 0; j < d; j++) {
+            auto val = dm(i, j);
+            if (std::abs(val) > 1E-6) {
+                
+                std::printf("(%lld, %lld): %.6f + %.6f i\n", i, j, val.real(), val.imag());
+            }
+        }
+        // std::printf("\n");
+    }
+}
+
 void applyHaarRandomUnitary(Qureg qureg, int* targets) {
     // applyMatrixN(qureg, targets, 3, haar_random_8());
     multiQubitUnitary(qureg, targets, 3, haar_random_8());
@@ -94,11 +135,11 @@ void applyHRULayer(Qureg qureg, int t) {
 }
 
 void applyZZPMLayer(Qureg qureg, qint t, double p) {
-    int mod = t % 3;
+    std::bernoulli_distribution bdist(p);
+    int mod = 0;
     std::uniform_int_distribution<int> ui(0, 2);
-    while (mod + 2 < qureg.numQubitsRepresented) {
-        auto pgen = uniform(gen);
-        if (pgen < p) {
+    while (mod + 1 < qureg.numQubitsRepresented) {
+        if (bdist(gen)) {
             applyZZPM(qureg, mod, mod + 1);
         }
         auto space = ui(gen);
@@ -114,47 +155,47 @@ qreal calcEntrophy(Qureg qureg, mat& rho, qint dim) {
             rho(i, j) = c;
         }
     }
+    // std::cout << "density matrix: " << std::endl;
     // std::cout << rho << std::endl;
-    auto evs        = rho.eigenvalues();
+    Eigen::ComplexEigenSolver<mat> solver;
+    solver.compute(rho);
+    auto evs      = solver.eigenvalues();
     qreal entropy = 0.;
-    // std::cout << evs << std::endl;
-    for (auto ev : evs) {
-        entropy -= ev.real() * std::log(ev.real());
+    for (auto _ev : evs) {
+        auto ev = _ev.real();
+        // std::cout << ev << " ";
+        if (ev > 0 && ev < 1) {
+            entropy -= ev * std::log2(ev);
+        }
     }
-    // std::cout << entropy << std::endl;
+    // std::cout << std::endl;
     return entropy;
-    
 }
 
 int main(int argc, char** argv) {
-    // ComplexMatrix4 op1;
-    // std::cout << "sdf";
     int n    = std::atoi(argv[1]);
-    double p = std::atoi(argv[2]);
-    auto T   = std::atoi(argv[3]);
+    double p = std::atof(argv[2]);
+    int T    = std::atoi(argv[3]);
     qint dim = 1 << n;
 
     QuESTEnv env = createQuESTEnv();
-
-    // haar_random_8();
-
     Qureg qubits = createDensityQureg(n, env);
-    // qreal reals[n * n]{0};
-    std::normal_distribution<qreal> dist1(0., 1.);
-    mat mycoeffs(dim, dim);
+
+    // generate initial density matrix: random
+    mat rho(dim, dim);
     for (qint i = 0; i < dim; i++) {
         for (qint j = 0; j < dim; j++) {
-            mycoeffs(i, j) = gen_complex();
+            rho(i, j) = gen_complex();
         }
     }
-    mycoeffs = mycoeffs * mycoeffs.conjugate().transpose();
-    mycoeffs = mycoeffs / mycoeffs.trace();
+    rho = rho * rho.conjugate().transpose();
+    rho = rho / rho.trace();
 
     qreal* reals = new qreal[dim * dim];
     qreal* imags = new qreal[dim * dim];
     for (qint i = 0; i < dim; i++) {
         for (qint j = 0; j < dim; j++) {
-            auto c             = mycoeffs(i, j);
+            auto c             = rho(i, j);
             reals[i * dim + j] = c.real();
             imags[i * dim + j] = c.imag();
         }
@@ -163,13 +204,42 @@ int main(int argc, char** argv) {
     delete[] reals;
     delete[] imags;
 
+    auto ents = std::vector<qreal>();
+
+    ents.emplace_back(calcEntrophy(qubits, rho, dim));
     for (int t = 0; t < T; t++) {
         applyHRULayer(qubits, t);
         applyZZPMLayer(qubits, t, p);
-        std::cout << calcEntrophy(qubits, mycoeffs, dim);
+        if ((t + 1) % 100 == 0) {
+        // if (t > 5000) {
+            // mat oldRho = rho;
+            auto ent = calcEntrophy(qubits, rho, dim);
+            // double oldEnt = ents.back();
+            ents.emplace_back(ent);
+            if (ent < 1.05) {
+                break;
+            }
+            // if (std::abs(oldEnt - ent) > 0.5) {
+            //     std::printf("old: %.3f, new: %.3f\n", oldEnt, ent);
+
+            //     std::printf("old: \n");
+            //     printDensityMatrixEasy(oldRho);
+            //     Eigen::ComplexEigenSolver<mat> solver;
+            //     solver.compute(oldRho);
+            //     std::cout << solver.eigenvalues() << std::endl;
+
+            //     std::printf("new: \n");
+            //     printDensityMatrixEasy(rho);
+            //     Eigen::ComplexEigenSolver<mat> solver2;
+            //     solver2.compute(rho);
+            //     std::cout << solver2.eigenvalues() << std::endl;
+            // }
+        }
     }
 
-    // std::cout << calcEntrophy(qubits, mycoeffs, dim);
+    for (auto ent : ents) {
+        std::cout << ent << std::endl;
+    }
 
     destroyQureg(qubits, env);
     destroyQuESTEnv(env);

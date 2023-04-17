@@ -10,5 +10,8 @@ if __name__ == '__main__':
     else:
         rounds = 20000
     ρ = RCDM(n, p)
-    ent = ρ.evolve(rounds)
-    np.savetxt("results/{}-{}.txt".format(n, p), ent, fmt="%.8f")
+    ent, density = ρ.evolve(rounds)
+    # np.savetxt("results/{}-{}.txt".format(n, p), ent, fmt="%.8f")
+    print(n, p)
+    print(ent)
+    print(density)
