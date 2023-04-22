@@ -12,11 +12,14 @@
 
 module load anaconda3
 conda activate quantum
+declare -a pids
 
 for n in {4..16..2}; do
     for p in {05..35..5}; do
-	# echo "$n-$p"
-        ( python main.py n 0.0$p & )
+    # echo "$n-$p"
+        python main.py n 0.0$p &
+        pids+=($!)
     done
 done
 
+wait "${pids[@]}"
